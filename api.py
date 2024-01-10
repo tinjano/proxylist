@@ -1,21 +1,28 @@
 from pinger import ping
-import json
 import pandas as pd
 import os
-from random import choice, sample
 import warnings
 
 
-# generate a .json file with respective data
 def generate_list(request_type='file'):
     """
-    request type can be: file, df, list
-    file will create a new .json
-    df will return data frame
-    list will return a list of ips
-    """
+    Generate proxy data.
 
-    df = ping().dropna()
+    Parameters
+    ----------
+    request_type : {'file', 'df', 'list'}, optional
+        Type of request:
+            'file': Write proxies to 'proxylist.json', return None.
+            'df': Return pandas.DataFrame with proxies.
+            'list': Return list of SOCKS5 IPs.
+
+    Returns
+    -------
+    None, pd.DataFrame, or list
+        Depending on the request_type.
+
+    """
+    df = ping()
 
     if request_type == 'df':
         return df
@@ -24,73 +31,147 @@ def generate_list(request_type='file'):
     elif request_type == 'file':
         script_directory = os.path.dirname(os.path.abspath(__file__))
         output_file = os.path.join(script_directory, 'proxylist.json')
-        df.to_json(
-            output_file,
-            orient='records',
-        )
+        df.to_json(output_file, orient='records')
         return
     else:
-        raise Exception('generate_list\'s request type is not supported. Try df, list, file.')
+        raise ValueError("Unsupported request type. Use 'df', 'list', 'file'.")
 
 
-class FetchMullvadProxy:
+class ProxyFetcher:
     """
-    init can take a df or it will create it
-    it will make a new one if told to do so
+    Abstract class for fetching proxies.
 
-    method fetch will return socks5 ip and has kwargs:
-        country - which country
-        city - which city
-        owner - O or R
-        max_latency
+    Parameters
+    ----------
+    df : pd.DataFrame, optional
+        Default: None. Set to None to get a new DataFrame, or pass an existing one.
+    update : bool, optional
+        Default: False. Set to True to update even if the file exists.
 
-    method fetch_sample will do same but return
-    a list with specified amount of different ips
+    Methods
+    -------
+    __init__(df=None, update=False)
+        Constructor for ProxyFetcher.
 
     """
-
     def __init__(self, df=None, update=False):
         if df:
             self.df = df
         else:
             script_directory = os.path.dirname(os.path.abspath(__file__))
-            output_file = os.path.join(script_directory, 'proxylist_another_old.json')
+            output_file = os.path.join(script_directory, 'proxylist.json')
 
             if not os.path.exists(output_file) or update:
                 generate_list(request_type='file')
 
             self.df = pd.read_json(output_file)
 
-            
 
+class RandomProxyFetcher(ProxyFetcher):
+    """
+    Fetch random proxies from the list.
+
+    Parameters
+    ----------
+    df : pd.DataFrame, optional
+        Default: None. Set to None to get a new DataFrame, or pass an existing one.
+    update : bool, optional
+        Default: False. Set to True to update even if the file exists.
+
+    Methods
+    -------
+    __init__(df=None, update=False)
+        Constructor for RandomProxyFetcher.
+
+    fetch(**kwargs)
+        Returns a single random SOCKS5 IP.
+
+        Parameters
+        ----------
+        country : str
+            Full name of the country (e.g., Italy, UK, USA).
+        city : str
+            Full name of the city (e.g., Vienna, New York).
+        ownership : str
+            'O' (Mullvad-owned) or 'R' (rented).
+        latency : int
+            Maximal tolerated latency.
+
+    fetch_sample(amount=5, **kwargs)
+        Returns a sample of random SOCKS5 IPs.
+
+        Parameters
+        ----------
+        amount : int
+            Number of random SOCKS5 IPs to fetch.
+
+    """
     def fetch(self, **kwargs):
+        """
+        Returns a single random SOCKS5 IP.
+
+        Parameters
+        ----------
+        country : str
+            Full name of the country (e.g., Italy, UK, USA).
+        city : str
+            Full name of the city (e.g., Vienna, New York).
+        ownership : str
+            'O' (Mullvad-owned) or 'R' (rented).
+        latency : int
+            Maximal tolerated latency.
+
+        Returns
+        -------
+        str
+            A single random SOCKS5 IP.
+
+        Raises
+        ------
+        Exception
+            If no proxies with the specified properties are found.
+
+        """
         mask = (
-                       self.df['country'] == kwargs.get('country', self.df['country'])
-               ) & (
-                       self.df['city'] == kwargs.get('city', self.df['city'])
-               ) & (
-                       self.df['ownership'] == kwargs.get('owner', self.df['ownership'])
-               ) & (
-                       self.df['latency'] <= kwargs.get('max_latency', self.df['latency'])
-               )
+                (self.df['country'] == kwargs.get('country', self.df['country'])) &
+                (self.df['city'] == kwargs.get('city', self.df['city'])) &
+                (self.df['ownership'] == kwargs.get('owner', self.df['ownership'])) &
+                (self.df['latency'] <= kwargs.get('max_latency', self.df['latency']))
+        )
+
         try:
-            return choice((self.df[mask])['socks5ip'])
+            return self.df[mask].socks5ip.sample().iloc[0]
         except IndexError:
             raise Exception('No proxies with properties found.')
 
     def fetch_sample(self, amount=5, **kwargs):
+        """
+        Returns a sample of random SOCKS5 IPs.
+
+        Parameters
+        ----------
+        amount : int
+            Number of random SOCKS5 IPs to fetch.
+
+        Returns
+        -------
+        list
+            A list of random SOCKS5 IPs.
+
+        Warnings
+        --------
+        - The conditions cannot be met. The program will return an empty list.
+        - Sample size was too large; it has been changed to the maximum available.
+
+        """
         mask = (
-                       self.df['country'] == kwargs.get('country', self.df['country'])
-               ) & (
-                       self.df['city'] == kwargs.get('city', self.df['city'])
-               ) & (
-                       self.df['ownership'] == kwargs.get('owner', self.df['ownership'])
-               ) & (
-                       self.df['latency'] <= kwargs.get('max_latency', self.df['latency'])
+                (self.df['country'] == kwargs.get('country', self.df['country'])) &
+                (self.df['city'] == kwargs.get('city', self.df['city'])) &
+                (self.df['ownership'] == kwargs.get('owner', self.df['ownership'])) &
+                (self.df['latency'] <= kwargs.get('max_latency', self.df['latency']))
+        )
 
-               )
-
-        series = self.df[mask]['socks5ip']
+        series = self.df[mask].socks5ip
         size = len(series)
 
         amount = min(amount, size)
@@ -102,6 +183,4 @@ class FetchMullvadProxy:
         if size < amount:
             warnings.warn(f'Sample size was too large, it has been changed to {amount}.', UserWarning)
 
-        return sample((self.df[mask])['socks5ip'], amount)
-
-
+        return self.df[mask].socks5ip.sample(n=amount).tolist()
